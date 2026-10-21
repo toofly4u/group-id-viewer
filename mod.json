@@ -1,17 +1,30 @@
 {
-	"geode": "$GEODE_VERSION",
-	"gd": {
-		"win": "2.2081",
-		"android": "2.2081",
-		"mac": "2.2081",
-		"ios": "2.2081"
-	},
-	"id": "$MOD_ID",
-	"name": "$MOD_NAME",
-	"version": "$MOD_VERSION",
-	"developer": "$MOD_DEVELOPER",
-	"description": "$MOD_DESCRIPTION",
-	"dependencies": {
-		"geode.node-ids": ">=v1.23.3"
-	}
+  "geode": "4.0.0",
+  "gd": {
+    "win": "2.2074",
+    "android": "2.2074",
+    "mac": "2.2074",
+    "ios": "2.2074"
+  },
+  "id": "yourname.group-id-viewer",
+  "name": "Group ID Viewer",
+  "version": "v1.0.0",
+  "developer": "yourname",
+  "description": "Shows an object's assigned group ID(s) on top of it in the editor.",
+  "settings": {
+    "show-all-groups": {
+      "type": "bool",
+      "name": "Show all groups",
+      "description": "If off, only the first group is shown.",
+      "default": true
+    },
+    "label-opacity": {
+      "type": "int",
+      "name": "Label opacity",
+      "default": 255,
+      "min": 20,
+      "max": 255,
+      "control": { "slider": true }
+    }
+  }
 }
