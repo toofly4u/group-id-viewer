@@ -1,100 +1,105 @@
-/**
- * Include the Geode headers.
- */
 #include <Geode/Geode.hpp>
+#include <Geode/modify/EditorUI.hpp>
+#include <unordered_map>
+#include <unordered_set>
 
-/**
- * Brings cocos2d and all Geode namespaces to the current scope.
- */
 using namespace geode::prelude;
 
-/**
- * `$modify` lets you extend and modify GD's classes.
- * To hook a function in Geode, simply $modify the class
- * and write a new function definition with the signature of
- * the function you want to hook.
- *
- * Here we use the overloaded `$modify` macro to set our own class name,
- * so that we can use it for button callbacks.
- *
- * Notice the header being included, you *must* include the header for
- * the class you are modifying, or you will get a compile error.
- *
- * Another way you could do this is like this:
- *
- * struct MyMenuLayer : Modify<MyMenuLayer, MenuLayer> {};
- */
-#include <Geode/modify/MenuLayer.hpp>
-class $modify(MyMenuLayer, MenuLayer) {
-	/**
-	 * Typically classes in GD are initialized using the `init` function, (though not always!),
-	 * so here we use it to add our own button to the bottom menu.
-	 *
-	 * Note that for all hooks, your signature has to *match exactly*,
-	 * `void init()` would not place a hook!
-	*/
-	bool init() {
-		/**
-		 * We call the original init function so that the
-		 * original class is properly initialized.
-		 */
-		if (!MenuLayer::init()) {
-			return false;
-		}
+class $modify(GroupIDEditorUI, EditorUI) {
+    struct Fields {
+        std::unordered_map<GameObject*, CCLabelBMFont*> labels;
+    };
 
-		/**
-		 * You can use methods from the `geode::log` namespace to log messages to the console,
-		 * being useful for debugging and such. See this page for more info about logging:
-		 * https://docs.geode-sdk.org/tutorials/logging
-		*/
-		log::debug("Hello from my MenuLayer::init hook! This layer has {} children.", this->getChildrenCount());
+    bool init(LevelEditorLayer* layer) {
+        if (!EditorUI::init(layer)) return false;
+        this->schedule(schedule_selector(GroupIDEditorUI::refreshGroupLabels), 0.05f);
+        return true;
+    }
 
-		/**
-		 * See this page for more info about buttons
-		 * https://docs.geode-sdk.org/tutorials/buttons
-		*/
-		auto myButton = CCMenuItemSpriteExtra::create(
-			CCSprite::createWithSpriteFrameName("GJ_likeBtn_001.png"),
-			this,
-			/**
-			 * Here we use the name we set earlier for our modify class.
-			*/
-			menu_selector(MyMenuLayer::onMyButton)
-		);
+    static std::string buildText(GameObject* obj) {
+        if (!obj->m_groups || obj->m_groupCount <= 0) return "";
+        bool showAll = Mod::get()->getSettingValue<bool>("show-all-groups");
+        int count = showAll ? obj->m_groupCount : 1;
 
-		/**
-		 * Here we access the `bottom-menu` node by its ID, and add our button to it.
-		 * Node IDs are a Geode feature, see this page for more info about it:
-		 * https://docs.geode-sdk.org/tutorials/nodetree
-		*/
-		auto menu = this->getChildByID("bottom-menu");
-		menu->addChild(myButton);
+        std::string out;
+        for (int i = 0; i < count; i++) {
+            if (i) out += ",";
+            out += std::to_string((*obj->m_groups)[i]);
+        }
+        return out;
+    }
 
-		/**
-		 * The `_spr` string literal operator just prefixes the string with
-		 * your mod id followed by a slash. This is good practice for setting your own node ids.
-		*/
-		myButton->setID("my-button"_spr);
+    void refreshGroupLabels(float) {
+        auto fields = m_fields.self();
+        auto lel = m_editorLayer;
+        if (!lel || !lel->m_objectLayer) return;
 
-		/**
-		 * We update the layout of the menu to ensure that our button is properly placed.
-		 * This is yet another Geode feature, see this page for more info about it:
-		 * https://docs.geode-sdk.org/tutorials/layouts
-		*/
-		menu->updateLayout();
+        // Playtesting: hide everything
+        if (lel->m_playbackMode == PlaybackMode::Playing) {
+            for (auto& [obj, label] : fields->labels) label->setVisible(false);
+            return;
+        }
 
-		/**
-		 * We return `true` to indicate that the class was properly initialized.
-		 */
-		return true;
-	}
+        auto layer = lel->m_objectLayer;
+        auto winSize = CCDirector::get()->getWinSize();
+        CCPoint a = layer->convertToNodeSpace(ccp(0, 0));
+        CCPoint b = layer->convertToNodeSpace(ccp(winSize.width, winSize.height));
+        float margin = 60.f;
+        CCRect view(
+            std::min(a.x, b.x) - margin, std::min(a.y, b.y) - margin,
+            std::abs(b.x - a.x) + margin * 2, std::abs(b.y - a.y) + margin * 2
+        );
 
-	/**
-	 * This is the callback function for the button we created earlier.
-	 * The signature for button callbacks must always be the same,
-	 * return type `void` and taking a `CCObject*`.
-	*/
-	void onMyButton(CCObject*) {
-		FLAlertLayer::create("Geode", "Hello from my custom mod!", "OK")->show();
-	}
+        auto opacity = static_cast<GLubyte>(Mod::get()->getSettingValue<int64_t>("label-opacity"));
+        std::unordered_set<GameObject*> seen;
+
+        CCObject* it;
+        CCARRAY_FOREACH(lel->m_objects, it) {
+            auto obj = static_cast<GameObject*>(it);
+            if (!obj) continue;
+
+            auto pos = obj->getPosition();
+            if (!view.containsPoint(pos)) continue;
+
+            std::string text = buildText(obj);
+            if (text.empty()) continue;
+
+            seen.insert(obj);
+
+            CCLabelBMFont* label = nullptr;
+            auto found = fields->labels.find(obj);
+            if (found != fields->labels.end()) {
+                label = found->second;
+            } else {
+                label = CCLabelBMFont::create(text.c_str(), "bigFont.fnt");
+                label->setID("group-label"_spr);
+                layer->addChild(label, 10000);
+                fields->labels[obj] = label;
+            }
+
+            if (text != label->getString()) label->setString(text.c_str());
+
+            // Fit the text inside a ~30 unit block, scaled with the object
+            float objScale = std::max(0.3f, std::abs(obj->getScale()));
+            float maxWidth = 26.f * objScale;
+            float scale = 0.4f * objScale;
+            float w = label->getContentSize().width * scale;
+            if (w > maxWidth) scale *= maxWidth / w;
+
+            label->setScale(scale);
+            label->setPosition(pos);
+            label->setOpacity(opacity);
+            label->setVisible(obj->isVisible());
+        }
+
+        // Remove labels for anything off-screen or deleted (never dereference the key)
+        for (auto itr = fields->labels.begin(); itr != fields->labels.end();) {
+            if (!seen.count(itr->first)) {
+                itr->second->removeFromParent();
+                itr = fields->labels.erase(itr);
+            } else {
+                ++itr;
+            }
+        }
+    }
 };
